@@ -4,11 +4,13 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { Navigation } from "./components/Navigation";
-import Dashboard from "./pages/Dashboard";
-import SubmitJob from "./pages/SubmitJob";
+import { ProtectedRoute } from "./components/ProtectedRoute";
+import DashboardFunctional from "./pages/DashboardFunctional";
+import SubmitJobFunctional from "./pages/SubmitJobFunctional";
 import JobsList from "./pages/JobsList";
 import ApiDocs from "./pages/ApiDocs";
 import Settings from "./pages/Settings";
+import Auth from "./pages/Auth";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -20,14 +22,53 @@ const App = () => (
       <Sonner />
       <BrowserRouter>
         <div className="dark min-h-screen">
-          <Navigation />
           <Routes>
-            <Route path="/" element={<Dashboard />} />
-            <Route path="/submit" element={<SubmitJob />} />
-            <Route path="/jobs" element={<JobsList />} />
-            <Route path="/api-docs" element={<ApiDocs />} />
-            <Route path="/settings" element={<Settings />} />
-            {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
+            <Route path="/auth" element={<Auth />} />
+            <Route
+              path="/"
+              element={
+                <ProtectedRoute>
+                  <Navigation />
+                  <DashboardFunctional />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/submit"
+              element={
+                <ProtectedRoute>
+                  <Navigation />
+                  <SubmitJobFunctional />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/jobs"
+              element={
+                <ProtectedRoute>
+                  <Navigation />
+                  <JobsList />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/api-docs"
+              element={
+                <ProtectedRoute>
+                  <Navigation />
+                  <ApiDocs />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/settings"
+              element={
+                <ProtectedRoute>
+                  <Navigation />
+                  <Settings />
+                </ProtectedRoute>
+              }
+            />
             <Route path="*" element={<NotFound />} />
           </Routes>
         </div>

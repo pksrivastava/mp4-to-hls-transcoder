@@ -14,7 +14,121 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      transcoded_outputs: {
+        Row: {
+          bitrate: number | null
+          created_at: string
+          id: string
+          job_id: string
+          manifest_url: string
+          quality_variant: string
+          resolution: string | null
+        }
+        Insert: {
+          bitrate?: number | null
+          created_at?: string
+          id?: string
+          job_id: string
+          manifest_url: string
+          quality_variant: string
+          resolution?: string | null
+        }
+        Update: {
+          bitrate?: number | null
+          created_at?: string
+          id?: string
+          job_id?: string
+          manifest_url?: string
+          quality_variant?: string
+          resolution?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "transcoded_outputs_job_id_fkey"
+            columns: ["job_id"]
+            isOneToOne: false
+            referencedRelation: "transcoding_jobs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      transcoding_jobs: {
+        Row: {
+          completed_at: string | null
+          created_at: string
+          error_message: string | null
+          file_name: string
+          format: Database["public"]["Enums"]["output_format"]
+          id: string
+          progress: number | null
+          source_url: string
+          status: Database["public"]["Enums"]["job_status"]
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          completed_at?: string | null
+          created_at?: string
+          error_message?: string | null
+          file_name: string
+          format: Database["public"]["Enums"]["output_format"]
+          id?: string
+          progress?: number | null
+          source_url: string
+          status?: Database["public"]["Enums"]["job_status"]
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          completed_at?: string | null
+          created_at?: string
+          error_message?: string | null
+          file_name?: string
+          format?: Database["public"]["Enums"]["output_format"]
+          id?: string
+          progress?: number | null
+          source_url?: string
+          status?: Database["public"]["Enums"]["job_status"]
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      transcripts: {
+        Row: {
+          content: string
+          created_at: string
+          format: string
+          id: string
+          job_id: string
+          language: string
+        }
+        Insert: {
+          content: string
+          created_at?: string
+          format?: string
+          id?: string
+          job_id: string
+          language?: string
+        }
+        Update: {
+          content?: string
+          created_at?: string
+          format?: string
+          id?: string
+          job_id?: string
+          language?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "transcripts_job_id_fkey"
+            columns: ["job_id"]
+            isOneToOne: false
+            referencedRelation: "transcoding_jobs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
       [_ in never]: never
@@ -23,7 +137,8 @@ export type Database = {
       [_ in never]: never
     }
     Enums: {
-      [_ in never]: never
+      job_status: "queued" | "processing" | "completed" | "failed" | "paused"
+      output_format: "HLS" | "DASH"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -150,6 +265,9 @@ export type CompositeTypes<
 
 export const Constants = {
   public: {
-    Enums: {},
+    Enums: {
+      job_status: ["queued", "processing", "completed", "failed", "paused"],
+      output_format: ["HLS", "DASH"],
+    },
   },
 } as const
