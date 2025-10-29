@@ -35,10 +35,6 @@ export const useFFmpeg = () => {
     onProgress?: (progress: number) => void
   ): Promise<{ manifestBlob: Blob; segmentBlobs: Blob[] }> => {
     const ffmpeg = ffmpegRef.current;
-    
-    if (!loaded) {
-      throw new Error("FFmpeg not loaded");
-    }
 
     // Set up progress monitoring
     const progressHandler = ({ progress }: { progress: number }) => {
@@ -100,10 +96,6 @@ export const useFFmpeg = () => {
     onProgress?: (progress: number) => void
   ): Promise<{ manifestBlob: Blob; segmentBlobs: Blob[] }> => {
     const ffmpeg = ffmpegRef.current;
-    
-    if (!loaded) {
-      throw new Error("FFmpeg not loaded");
-    }
 
     const progressHandler = ({ progress }: { progress: number }) => {
       const percent = Math.round(progress * 100);
@@ -152,10 +144,6 @@ export const useFFmpeg = () => {
     onProgress?: (progress: number) => void
   ): Promise<Blob> => {
     const ffmpeg = ffmpegRef.current;
-    
-    if (!loaded) {
-      throw new Error("FFmpeg not loaded");
-    }
 
     const progressHandler = ({ progress }: { progress: number }) => {
       const percent = Math.round(progress * 100);
