@@ -101,15 +101,40 @@ const DashboardFunctional = () => {
     }
   };
 
+  const [selectedQualities, setSelectedQualities] = useState<Array<{ label: string; url: string }>>([]);
+
   const handleViewJob = async (id: string) => {
     const job = jobs.find((j) => j.id === id);
-    if (job && job.status === "completed" && job.source_url) {
-      setSelectedJobUrl(job.source_url);
-      setIsPreviewOpen(true);
+    if (job && job.status === "completed") {
+      // Fetch all quality variants for this job
+      const { data: outputs } = await supabase
+        .from("transcoded_outputs")
+        .select("manifest_url, quality_variant")
+        .eq("job_id", id);
+
+      if (outputs && outputs.length > 0) {
+        const qualities = outputs.map(output => ({
+          label: output.quality_variant,
+          url: output.manifest_url,
+        }));
+        setSelectedQualities(qualities);
+        setSelectedJobUrl(outputs[0].manifest_url);
+        setIsPreviewOpen(true);
+      } else if (job.source_url) {
+        // Fallback to source if no outputs
+        setSelectedJobUrl(job.source_url);
+        setSelectedQualities([]);
+        setIsPreviewOpen(true);
+      } else {
+        toast({
+          title: "Preview not available",
+          description: "This job has no available outputs",
+        });
+      }
     } else {
       toast({
         title: "Preview not available",
-        description: "This job is not completed yet or has no preview",
+        description: "This job is not completed yet",
       });
     }
   };
@@ -247,7 +272,12 @@ const DashboardFunctional = () => {
           <DialogHeader>
             <DialogTitle>Video Preview</DialogTitle>
           </DialogHeader>
-          {selectedJobUrl && <VideoPreview videoUrl={selectedJobUrl} />}
+          {selectedJobUrl && (
+            <VideoPreview 
+              videoUrl={selectedJobUrl} 
+              qualities={selectedQualities.length > 0 ? selectedQualities : undefined}
+            />
+          )}
         </DialogContent>
       </Dialog>
     </div>

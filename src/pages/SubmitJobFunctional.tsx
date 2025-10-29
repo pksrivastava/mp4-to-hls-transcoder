@@ -18,7 +18,7 @@ const SubmitJobFunctional = () => {
   const [isTranscoding, setIsTranscoding] = useState(false);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const { toast } = useToast();
-  const { loaded, isLoading, load, transcodeToHLS, convertToMP4 } = useFFmpeg();
+  const { loaded, isLoading, load, transcodeToHLS, transcodeToDASH, convertToMP4 } = useFFmpeg();
   const navigate = useNavigate();
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -105,52 +105,121 @@ const SubmitJobFunctional = () => {
 
       setPreviewUrl(publicUrl);
 
-      // Transcode to HLS
-      const { manifestBlob, segmentBlobs } = await transcodeToHLS(
-        new File([mp4Blob], "source.mp4", { type: "video/mp4" }),
-        (prog) => {
-          setProgress(50 + Math.round(prog * 0.5)); // Second 50%
-        }
-      );
+      // Transcode based on selected format
+      if (format === "HLS") {
+        const { masterManifest, variants } = await transcodeToHLS(
+          new File([mp4Blob], "source.mp4", { type: "video/mp4" }),
+          (prog) => {
+            setProgress(50 + Math.round(prog * 0.5));
+          }
+        );
 
-      // Upload manifest
-      const manifestPath = `${user.id}/${job.id}/master.m3u8`;
-      await supabase.storage
-        .from("transcoded-videos")
-        .upload(manifestPath, manifestBlob);
-
-      // Upload segments
-      for (let i = 0; i < segmentBlobs.length; i++) {
-        const segmentPath = `${user.id}/${job.id}/segment_${i.toString().padStart(3, '0')}.ts`;
+        // Upload master playlist
+        const masterPath = `${user.id}/${job.id}/master.m3u8`;
         await supabase.storage
           .from("transcoded-videos")
-          .upload(segmentPath, segmentBlobs[i]);
+          .upload(masterPath, masterManifest);
+
+        // Upload all variants
+        for (const variant of variants) {
+          // Upload variant manifest
+          const variantManifestPath = `${user.id}/${job.id}/output_${variant.resolution}.m3u8`;
+          await supabase.storage
+            .from("transcoded-videos")
+            .upload(variantManifestPath, variant.manifestBlob);
+
+          // Upload variant segments
+          for (let i = 0; i < variant.segmentBlobs.length; i++) {
+            const segmentPath = `${user.id}/${job.id}/segment_${variant.resolution}_${i.toString().padStart(3, '0')}.ts`;
+            await supabase.storage
+              .from("transcoded-videos")
+              .upload(segmentPath, variant.segmentBlobs[i]);
+          }
+
+          // Create output record for each variant
+          const { data: { publicUrl: variantUrl } } = supabase.storage
+            .from("transcoded-videos")
+            .getPublicUrl(variantManifestPath);
+
+          await supabase.from("transcoded_outputs").insert({
+            job_id: job.id,
+            manifest_url: variantUrl,
+            quality_variant: variant.resolution,
+            bitrate: variant.bitrate,
+            resolution: variant.resolution === "360p" ? "640x360" :
+                        variant.resolution === "480p" ? "854x480" :
+                        variant.resolution === "720p" ? "1280x720" : "1920x1080",
+          });
+        }
+
+        // Get master playlist URL
+        const { data: { publicUrl: manifestUrl } } = supabase.storage
+          .from("transcoded-videos")
+          .getPublicUrl(masterPath);
+
+        // Update job with master playlist URL
+        await supabase
+          .from("transcoding_jobs")
+          .update({
+            status: "completed",
+            progress: 100,
+            source_url: manifestUrl,
+            completed_at: new Date().toISOString(),
+          })
+          .eq("id", job.id);
+
+      } else {
+        // DASH format
+        const { manifestBlob, segmentBlobs, variants } = await transcodeToDASH(
+          new File([mp4Blob], "source.mp4", { type: "video/mp4" }),
+          (prog) => {
+            setProgress(50 + Math.round(prog * 0.5));
+          }
+        );
+
+        // Upload MPD manifest
+        const manifestPath = `${user.id}/${job.id}/output.mpd`;
+        await supabase.storage
+          .from("transcoded-videos")
+          .upload(manifestPath, manifestBlob);
+
+        // Upload all segments
+        for (const segment of segmentBlobs) {
+          const segmentPath = `${user.id}/${job.id}/${segment.name}`;
+          await supabase.storage
+            .from("transcoded-videos")
+            .upload(segmentPath, segment.blob);
+        }
+
+        // Get manifest URL
+        const { data: { publicUrl: manifestUrl } } = supabase.storage
+          .from("transcoded-videos")
+          .getPublicUrl(manifestPath);
+
+        // Create output records for all variants
+        for (const variant of variants) {
+          await supabase.from("transcoded_outputs").insert({
+            job_id: job.id,
+            manifest_url: manifestUrl,
+            quality_variant: variant.resolution,
+            bitrate: variant.bitrate,
+            resolution: variant.resolution === "360p" ? "640x360" :
+                        variant.resolution === "480p" ? "854x480" :
+                        variant.resolution === "720p" ? "1280x720" : "1920x1080",
+          });
+        }
+
+        // Update job
+        await supabase
+          .from("transcoding_jobs")
+          .update({
+            status: "completed",
+            progress: 100,
+            source_url: manifestUrl,
+            completed_at: new Date().toISOString(),
+          })
+          .eq("id", job.id);
       }
-
-      // Get public URL for manifest
-      const { data: { publicUrl: manifestUrl } } = supabase.storage
-        .from("transcoded-videos")
-        .getPublicUrl(manifestPath);
-
-      // Update job status
-      await supabase
-        .from("transcoding_jobs")
-        .update({
-          status: "completed",
-          progress: 100,
-          source_url: publicUrl,
-          completed_at: new Date().toISOString(),
-        })
-        .eq("id", job.id);
-
-      // Create output record
-      await supabase.from("transcoded_outputs").insert({
-        job_id: job.id,
-        manifest_url: manifestUrl,
-        quality_variant: "720p",
-        bitrate: 2500000,
-        resolution: "1280x720",
-      });
 
       toast({
         title: "Transcoding completed!",

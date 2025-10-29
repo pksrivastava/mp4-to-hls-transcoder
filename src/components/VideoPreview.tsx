@@ -1,21 +1,33 @@
-import { useEffect, useRef, useState } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Play, Pause, Volume2, VolumeX, Maximize } from "lucide-react";
 import { Slider } from "@/components/ui/slider";
+import { Play, Pause, Volume2, VolumeX, Maximize, Settings } from "lucide-react";
+import { useRef, useState, useEffect } from "react";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 interface VideoPreviewProps {
   videoUrl: string;
   title?: string;
+  qualities?: Array<{ label: string; url: string }>;
 }
 
-export const VideoPreview = ({ videoUrl, title }: VideoPreviewProps) => {
+export const VideoPreview = ({ videoUrl, title, qualities }: VideoPreviewProps) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [volume, setVolume] = useState(1);
+  const [selectedQuality, setSelectedQuality] = useState(videoUrl);
+
+  useEffect(() => {
+    setSelectedQuality(videoUrl);
+  }, [videoUrl]);
 
   useEffect(() => {
     const video = videoRef.current;
@@ -34,7 +46,7 @@ export const VideoPreview = ({ videoUrl, title }: VideoPreviewProps) => {
       video.removeEventListener("loadedmetadata", handleLoadedMetadata);
       video.removeEventListener("ended", handleEnded);
     };
-  }, []);
+  }, [selectedQuality]);
 
   const togglePlay = () => {
     const video = videoRef.current;
@@ -90,6 +102,18 @@ export const VideoPreview = ({ videoUrl, title }: VideoPreviewProps) => {
     return `${mins}:${secs.toString().padStart(2, "0")}`;
   };
 
+  const handleQualityChange = (url: string) => {
+    const wasPlaying = !videoRef.current?.paused;
+    const time = currentTime;
+    setSelectedQuality(url);
+    setTimeout(() => {
+      if (videoRef.current) {
+        videoRef.current.currentTime = time;
+        if (wasPlaying) videoRef.current.play();
+      }
+    }, 100);
+  };
+
   return (
     <Card className="overflow-hidden">
       {title && (
@@ -100,9 +124,9 @@ export const VideoPreview = ({ videoUrl, title }: VideoPreviewProps) => {
       <div className="relative bg-black">
         <video
           ref={videoRef}
-          src={videoUrl}
-          className="w-full aspect-video"
-          onClick={togglePlay}
+          className="w-full rounded-lg bg-black"
+          src={selectedQuality}
+          key={selectedQuality}
         />
         
         <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent p-4">
@@ -116,55 +140,66 @@ export const VideoPreview = ({ videoUrl, title }: VideoPreviewProps) => {
             />
           </div>
 
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={togglePlay}
-                className="text-white hover:bg-white/20"
-              >
-                {isPlaying ? (
-                  <Pause className="w-4 h-4" />
-                ) : (
-                  <Play className="w-4 h-4" />
-                )}
-              </Button>
-
-              <div className="flex items-center gap-2">
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  onClick={toggleMute}
-                  className="text-white hover:bg-white/20"
-                >
-                  {isMuted ? (
-                    <VolumeX className="w-4 h-4" />
-                  ) : (
-                    <Volume2 className="w-4 h-4" />
-                  )}
-                </Button>
-                <Slider
-                  value={[volume]}
-                  max={1}
-                  step={0.01}
-                  onValueChange={handleVolumeChange}
-                  className="w-20 cursor-pointer"
-                />
-              </div>
-
-              <span className="text-sm text-white">
-                {formatTime(currentTime)} / {formatTime(duration)}
-              </span>
-            </div>
-
+          <div className="flex items-center gap-2">
             <Button
-              size="sm"
               variant="ghost"
-              onClick={toggleFullscreen}
+              size="icon"
+              onClick={togglePlay}
               className="text-white hover:bg-white/20"
             >
-              <Maximize className="w-4 h-4" />
+              {isPlaying ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
+            </Button>
+
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={toggleMute}
+              className="text-white hover:bg-white/20"
+            >
+              {isMuted ? <VolumeX className="h-4 w-4" /> : <Volume2 className="h-4 w-4" />}
+            </Button>
+
+            <Slider
+              value={[volume]}
+              min={0}
+              max={1}
+              step={0.1}
+              onValueChange={handleVolumeChange}
+              className="w-24"
+            />
+
+            <span className="text-sm text-white ml-2">
+              {formatTime(currentTime)} / {formatTime(duration)}
+            </span>
+
+            {qualities && qualities.length > 1 && (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="ghost" size="icon" className="text-white hover:bg-white/20">
+                    <Settings className="h-4 w-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent>
+                  {qualities.map((quality) => (
+                    <DropdownMenuItem
+                      key={quality.url}
+                      onClick={() => handleQualityChange(quality.url)}
+                      className={selectedQuality === quality.url ? "bg-accent" : ""}
+                    >
+                      {quality.label}
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
+
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={toggleFullscreen}
+              className="ml-auto text-white hover:bg-white/20"
+            >
+              <Maximize className="h-4 w-4" />
             </Button>
           </div>
         </div>
