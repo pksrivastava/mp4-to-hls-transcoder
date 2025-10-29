@@ -244,14 +244,8 @@ export const useFFmpeg = () => {
     }
   };
 
-  useEffect(() => {
-    return () => {
-      // Cleanup
-      if (ffmpegRef.current) {
-        ffmpegRef.current.terminate();
-      }
-    };
-  }, []);
+  // Removed cleanup to prevent FFmpeg termination errors
+  // FFmpeg instance is kept alive for better performance
 
   return {
     loaded,

@@ -3,6 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
 import { Play, Pause, Volume2, VolumeX, Maximize, Settings } from "lucide-react";
 import { useRef, useState, useEffect } from "react";
+import Hls from "hls.js";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -18,6 +19,7 @@ interface VideoPreviewProps {
 
 export const VideoPreview = ({ videoUrl, title, qualities }: VideoPreviewProps) => {
   const videoRef = useRef<HTMLVideoElement>(null);
+  const hlsRef = useRef<Hls | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
@@ -33,6 +35,56 @@ export const VideoPreview = ({ videoUrl, title, qualities }: VideoPreviewProps) 
     const video = videoRef.current;
     if (!video) return;
 
+    // Clean up previous HLS instance
+    if (hlsRef.current) {
+      hlsRef.current.destroy();
+      hlsRef.current = null;
+    }
+
+    // Check if URL is HLS manifest
+    if (selectedQuality.includes('.m3u8')) {
+      if (Hls.isSupported()) {
+        const hls = new Hls({
+          enableWorker: true,
+          lowLatencyMode: false,
+        });
+        hlsRef.current = hls;
+
+        hls.loadSource(selectedQuality);
+        hls.attachMedia(video);
+
+        hls.on(Hls.Events.MANIFEST_PARSED, () => {
+          console.log('HLS manifest loaded');
+        });
+
+        hls.on(Hls.Events.ERROR, (event, data) => {
+          console.error('HLS error:', data);
+          if (data.fatal) {
+            switch (data.type) {
+              case Hls.ErrorTypes.NETWORK_ERROR:
+                console.error('Network error');
+                hls.startLoad();
+                break;
+              case Hls.ErrorTypes.MEDIA_ERROR:
+                console.error('Media error');
+                hls.recoverMediaError();
+                break;
+              default:
+                console.error('Fatal error, destroying HLS');
+                hls.destroy();
+                break;
+            }
+          }
+        });
+      } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+        // Native HLS support (Safari)
+        video.src = selectedQuality;
+      }
+    } else {
+      // Regular MP4 or other formats
+      video.src = selectedQuality;
+    }
+
     const handleTimeUpdate = () => setCurrentTime(video.currentTime);
     const handleLoadedMetadata = () => setDuration(video.duration);
     const handleEnded = () => setIsPlaying(false);
@@ -45,6 +97,9 @@ export const VideoPreview = ({ videoUrl, title, qualities }: VideoPreviewProps) 
       video.removeEventListener("timeupdate", handleTimeUpdate);
       video.removeEventListener("loadedmetadata", handleLoadedMetadata);
       video.removeEventListener("ended", handleEnded);
+      if (hlsRef.current) {
+        hlsRef.current.destroy();
+      }
     };
   }, [selectedQuality]);
 
@@ -125,8 +180,6 @@ export const VideoPreview = ({ videoUrl, title, qualities }: VideoPreviewProps) 
         <video
           ref={videoRef}
           className="w-full rounded-lg bg-black"
-          src={selectedQuality}
-          key={selectedQuality}
         />
         
         <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent p-4">
