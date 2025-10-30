@@ -58,15 +58,32 @@ const SubmitJobFunctional = () => {
       setProgress(0);
       setCurrentFileIndex(0);
 
+      console.log("Starting transcoding process...");
+
       // Load FFmpeg if not loaded
       if (!loaded) {
+        console.log("FFmpeg not loaded, loading now...");
         toast({
           title: "Loading FFmpeg...",
-          description: "This may take a moment on first use",
+          description: "This may take a moment (30-60 seconds on first use)",
         });
-        await load();
+        
+        try {
+          const loadTimeout = setTimeout(() => {
+            console.error("FFmpeg loading timeout");
+            throw new Error("FFmpeg loading timed out. Please refresh and try again.");
+          }, 120000); // 2 minute timeout
+
+          await load();
+          clearTimeout(loadTimeout);
+          console.log("FFmpeg loaded successfully");
+        } catch (loadError) {
+          console.error("FFmpeg loading error:", loadError);
+          throw loadError;
+        }
       }
 
+      console.log(`Starting batch transcoding for ${selectedFiles.length} file(s)`);
       toast({
         title: "Batch transcoding started",
         description: `Processing ${selectedFiles.length} file(s)...`,
@@ -77,7 +94,10 @@ const SubmitJobFunctional = () => {
         const selectedFile = selectedFiles[fileIdx];
         setCurrentFileIndex(fileIdx + 1);
 
+        console.log(`Processing file ${fileIdx + 1}/${selectedFiles.length}: ${selectedFile.name}`);
+
         // Create job in database
+        console.log("Creating job in database...");
         const { data: job, error: jobError } = await supabase
           .from("transcoding_jobs")
           .insert({
@@ -90,13 +110,20 @@ const SubmitJobFunctional = () => {
           .select()
           .single();
 
-        if (jobError) throw jobError;
+        if (jobError) {
+          console.error("Job creation error:", jobError);
+          throw jobError;
+        }
+        console.log("Job created:", job.id);
 
         // First convert to optimized MP4
+        console.log("Converting to MP4...");
         const mp4Blob = await convertToMP4(selectedFile, (prog) => {
           const fileProgress = (fileIdx + prog * 0.5) / selectedFiles.length;
           setProgress(Math.round(fileProgress * 100));
+          console.log(`MP4 conversion progress: ${Math.round(prog * 100)}%`);
         });
+        console.log("MP4 conversion complete");
 
         // Upload source to storage
         const sourcePath = `${user.id}/${job.id}/source.mp4`;
@@ -248,12 +275,16 @@ const SubmitJobFunctional = () => {
 
     } catch (error: any) {
       console.error("Transcoding error:", error);
+      console.error("Error stack:", error.stack);
+      
+      // Update job status to failed if we have a job ID
       toast({
         title: "Transcoding failed",
-        description: error.message || "An error occurred during transcoding",
+        description: error.message || "An error occurred during transcoding. Check console for details.",
         variant: "destructive",
       });
     } finally {
+      console.log("Transcoding process finished");
       setIsTranscoding(false);
     }
   };
@@ -344,13 +375,23 @@ const SubmitJobFunctional = () => {
                 <div className="space-y-2">
                   <div className="flex justify-between text-sm">
                     <span className="text-muted-foreground">
-                      Transcoding Progress (File {currentFileIndex}/{selectedFiles.length})
+                      {!loaded && isLoading 
+                        ? "Loading FFmpeg..." 
+                        : `Transcoding Progress (File ${currentFileIndex}/${selectedFiles.length})`
+                      }
                     </span>
                     <span className="font-medium">{progress}%</span>
                   </div>
                   <Progress value={progress} className="h-2" />
                   {!loaded && isLoading && (
-                    <p className="text-xs text-muted-foreground">Loading FFmpeg (first time only)...</p>
+                    <p className="text-xs text-muted-foreground animate-pulse">
+                      Loading FFmpeg for the first time (30-60 seconds)... Please wait.
+                    </p>
+                  )}
+                  {loaded && currentFileIndex > 0 && (
+                    <p className="text-xs text-muted-foreground">
+                      Processing file {currentFileIndex} of {selectedFiles.length}
+                    </p>
                   )}
                 </div>
               )}

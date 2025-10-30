@@ -14,17 +14,29 @@ export const useFFmpeg = () => {
     const ffmpeg = ffmpegRef.current;
 
     try {
+      console.log("Starting FFmpeg load...");
       const baseURL = "https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm";
       
+      console.log("Fetching core JS...");
+      const coreURL = await toBlobURL(`${baseURL}/ffmpeg-core.js`, "text/javascript");
+      console.log("Core JS loaded");
+      
+      console.log("Fetching WASM...");
+      const wasmURL = await toBlobURL(`${baseURL}/ffmpeg-core.wasm`, "application/wasm");
+      console.log("WASM loaded");
+      
+      console.log("Initializing FFmpeg...");
       await ffmpeg.load({
-        coreURL: await toBlobURL(`${baseURL}/ffmpeg-core.js`, "text/javascript"),
-        wasmURL: await toBlobURL(`${baseURL}/ffmpeg-core.wasm`, "application/wasm"),
+        coreURL,
+        wasmURL,
       });
 
+      console.log("FFmpeg loaded successfully");
       setLoaded(true);
     } catch (error) {
       console.error("Failed to load FFmpeg:", error);
-      throw error;
+      setIsLoading(false);
+      throw new Error(`FFmpeg loading failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
     } finally {
       setIsLoading(false);
     }
