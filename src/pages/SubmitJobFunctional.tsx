@@ -13,18 +13,19 @@ import { useNavigate } from "react-router-dom";
 
 const SubmitJobFunctional = () => {
   const [format, setFormat] = useState<"HLS" | "DASH">("HLS");
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [progress, setProgress] = useState(0);
   const [isTranscoding, setIsTranscoding] = useState(false);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [currentFileIndex, setCurrentFileIndex] = useState(0);
   const { toast } = useToast();
   const { loaded, isLoading, load, transcodeToHLS, transcodeToDASH, convertToMP4 } = useFFmpeg();
   const navigate = useNavigate();
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      setSelectedFile(file);
+    const files = Array.from(e.target.files || []);
+    if (files.length > 0) {
+      setSelectedFiles(files);
       setPreviewUrl(null);
     }
   };
@@ -32,10 +33,10 @@ const SubmitJobFunctional = () => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (!selectedFile) {
+    if (selectedFiles.length === 0) {
       toast({
-        title: "No file selected",
-        description: "Please select a video file to transcode",
+        title: "No files selected",
+        description: "Please select video files to transcode",
         variant: "destructive",
       });
       return;
@@ -55,6 +56,7 @@ const SubmitJobFunctional = () => {
     try {
       setIsTranscoding(true);
       setProgress(0);
+      setCurrentFileIndex(0);
 
       // Load FFmpeg if not loaded
       if (!loaded) {
@@ -65,165 +67,176 @@ const SubmitJobFunctional = () => {
         await load();
       }
 
-      // Create job in database
-      const { data: job, error: jobError } = await supabase
-        .from("transcoding_jobs")
-        .insert({
-          user_id: user.id,
-          file_name: selectedFile.name,
-          source_url: "processing",
-          format: format,
-          status: "processing",
-        })
-        .select()
-        .single();
-
-      if (jobError) throw jobError;
-
       toast({
-        title: "Transcoding started",
-        description: "Your video is being transcoded...",
+        title: "Batch transcoding started",
+        description: `Processing ${selectedFiles.length} file(s)...`,
       });
 
-      // First convert to optimized MP4
-      const mp4Blob = await convertToMP4(selectedFile, (prog) => {
-        setProgress(Math.round(prog * 0.5)); // First 50%
-      });
+      // Process each file
+      for (let fileIdx = 0; fileIdx < selectedFiles.length; fileIdx++) {
+        const selectedFile = selectedFiles[fileIdx];
+        setCurrentFileIndex(fileIdx + 1);
 
-      // Upload source to storage
-      const sourcePath = `${user.id}/${job.id}/source.mp4`;
-      const { error: uploadError } = await supabase.storage
-        .from("source-videos")
-        .upload(sourcePath, mp4Blob);
+        // Create job in database
+        const { data: job, error: jobError } = await supabase
+          .from("transcoding_jobs")
+          .insert({
+            user_id: user.id,
+            file_name: selectedFile.name,
+            source_url: "processing",
+            format: format,
+            status: "processing",
+          })
+          .select()
+          .single();
 
-      if (uploadError) throw uploadError;
+        if (jobError) throw jobError;
 
-      // Create preview URL
-      const { data: { publicUrl } } = supabase.storage
-        .from("source-videos")
-        .getPublicUrl(sourcePath);
+        // First convert to optimized MP4
+        const mp4Blob = await convertToMP4(selectedFile, (prog) => {
+          const fileProgress = (fileIdx + prog * 0.5) / selectedFiles.length;
+          setProgress(Math.round(fileProgress * 100));
+        });
 
-      setPreviewUrl(publicUrl);
+        // Upload source to storage
+        const sourcePath = `${user.id}/${job.id}/source.mp4`;
+        const { error: uploadError } = await supabase.storage
+          .from("source-videos")
+          .upload(sourcePath, mp4Blob);
 
-      // Transcode based on selected format
-      if (format === "HLS") {
-        const { masterManifest, variants } = await transcodeToHLS(
-          new File([mp4Blob], "source.mp4", { type: "video/mp4" }),
-          (prog) => {
-            setProgress(50 + Math.round(prog * 0.5));
-          }
-        );
+        if (uploadError) throw uploadError;
 
-        // Upload master playlist
-        const masterPath = `${user.id}/${job.id}/master.m3u8`;
-        await supabase.storage
-          .from("transcoded-videos")
-          .upload(masterPath, masterManifest);
+        // Create preview URL
+        const { data: { publicUrl } } = supabase.storage
+          .from("source-videos")
+          .getPublicUrl(sourcePath);
 
-        // Upload all variants
-        for (const variant of variants) {
-          // Upload variant manifest
-          const variantManifestPath = `${user.id}/${job.id}/output_${variant.resolution}.m3u8`;
+        if (fileIdx === 0) setPreviewUrl(publicUrl);
+
+        // Transcode based on selected format
+        if (format === "HLS") {
+          const { masterManifest, variants } = await transcodeToHLS(
+            new File([mp4Blob], "source.mp4", { type: "video/mp4" }),
+            (prog) => {
+              const fileProgress = (fileIdx + 0.5 + prog * 0.5) / selectedFiles.length;
+              setProgress(Math.round(fileProgress * 100));
+            }
+          );
+
+          // Upload master playlist
+          const masterPath = `${user.id}/${job.id}/master.m3u8`;
           await supabase.storage
             .from("transcoded-videos")
-            .upload(variantManifestPath, variant.manifestBlob);
+            .upload(masterPath, masterManifest);
 
-          // Upload variant segments
-          for (let i = 0; i < variant.segmentBlobs.length; i++) {
-            const segmentPath = `${user.id}/${job.id}/segment_${variant.resolution}_${i.toString().padStart(3, '0')}.ts`;
+          // Upload all variants
+          for (const variant of variants) {
+            // Upload variant manifest
+            const variantManifestPath = `${user.id}/${job.id}/output_${variant.resolution}.m3u8`;
             await supabase.storage
               .from("transcoded-videos")
-              .upload(segmentPath, variant.segmentBlobs[i]);
+              .upload(variantManifestPath, variant.manifestBlob);
+
+            // Upload variant segments
+            for (let i = 0; i < variant.segmentBlobs.length; i++) {
+              const segmentPath = `${user.id}/${job.id}/segment_${variant.resolution}_${i.toString().padStart(3, '0')}.ts`;
+              await supabase.storage
+                .from("transcoded-videos")
+                .upload(segmentPath, variant.segmentBlobs[i]);
+            }
+
+            // Create output record for each variant
+            const { data: { publicUrl: variantUrl } } = supabase.storage
+              .from("transcoded-videos")
+              .getPublicUrl(variantManifestPath);
+
+            await supabase.from("transcoded_outputs").insert({
+              job_id: job.id,
+              manifest_url: variantUrl,
+              quality_variant: variant.resolution,
+              bitrate: variant.bitrate,
+              resolution: variant.resolution === "240p" ? "426x240" :
+                          variant.resolution === "360p" ? "640x360" :
+                          variant.resolution === "480p" ? "854x480" :
+                          variant.resolution === "720p" ? "1280x720" : "1920x1080",
+            });
           }
 
-          // Create output record for each variant
-          const { data: { publicUrl: variantUrl } } = supabase.storage
+          // Get master playlist URL
+          const { data: { publicUrl: manifestUrl } } = supabase.storage
             .from("transcoded-videos")
-            .getPublicUrl(variantManifestPath);
+            .getPublicUrl(masterPath);
 
-          await supabase.from("transcoded_outputs").insert({
-            job_id: job.id,
-            manifest_url: variantUrl,
-            quality_variant: variant.resolution,
-            bitrate: variant.bitrate,
-            resolution: variant.resolution === "360p" ? "640x360" :
-                        variant.resolution === "480p" ? "854x480" :
-                        variant.resolution === "720p" ? "1280x720" : "1920x1080",
-          });
-        }
+          // Update job with master playlist URL
+          await supabase
+            .from("transcoding_jobs")
+            .update({
+              status: "completed",
+              progress: 100,
+              source_url: manifestUrl,
+              completed_at: new Date().toISOString(),
+            })
+            .eq("id", job.id);
 
-        // Get master playlist URL
-        const { data: { publicUrl: manifestUrl } } = supabase.storage
-          .from("transcoded-videos")
-          .getPublicUrl(masterPath);
+        } else {
+          // DASH format
+          const { manifestBlob, segmentBlobs, variants } = await transcodeToDASH(
+            new File([mp4Blob], "source.mp4", { type: "video/mp4" }),
+            (prog) => {
+              const fileProgress = (fileIdx + 0.5 + prog * 0.5) / selectedFiles.length;
+              setProgress(Math.round(fileProgress * 100));
+            }
+          );
 
-        // Update job with master playlist URL
-        await supabase
-          .from("transcoding_jobs")
-          .update({
-            status: "completed",
-            progress: 100,
-            source_url: manifestUrl,
-            completed_at: new Date().toISOString(),
-          })
-          .eq("id", job.id);
-
-      } else {
-        // DASH format
-        const { manifestBlob, segmentBlobs, variants } = await transcodeToDASH(
-          new File([mp4Blob], "source.mp4", { type: "video/mp4" }),
-          (prog) => {
-            setProgress(50 + Math.round(prog * 0.5));
-          }
-        );
-
-        // Upload MPD manifest
-        const manifestPath = `${user.id}/${job.id}/output.mpd`;
-        await supabase.storage
-          .from("transcoded-videos")
-          .upload(manifestPath, manifestBlob);
-
-        // Upload all segments
-        for (const segment of segmentBlobs) {
-          const segmentPath = `${user.id}/${job.id}/${segment.name}`;
+          // Upload MPD manifest
+          const manifestPath = `${user.id}/${job.id}/output.mpd`;
           await supabase.storage
             .from("transcoded-videos")
-            .upload(segmentPath, segment.blob);
+            .upload(manifestPath, manifestBlob);
+
+          // Upload all segments
+          for (const segment of segmentBlobs) {
+            const segmentPath = `${user.id}/${job.id}/${segment.name}`;
+            await supabase.storage
+              .from("transcoded-videos")
+              .upload(segmentPath, segment.blob);
+          }
+
+          // Get manifest URL
+          const { data: { publicUrl: manifestUrl } } = supabase.storage
+            .from("transcoded-videos")
+            .getPublicUrl(manifestPath);
+
+          // Create output records for all variants
+          for (const variant of variants) {
+            await supabase.from("transcoded_outputs").insert({
+              job_id: job.id,
+              manifest_url: manifestUrl,
+              quality_variant: variant.resolution,
+              bitrate: variant.bitrate,
+              resolution: variant.resolution === "240p" ? "426x240" :
+                          variant.resolution === "360p" ? "640x360" :
+                          variant.resolution === "480p" ? "854x480" :
+                          variant.resolution === "720p" ? "1280x720" : "1920x1080",
+            });
+          }
+
+          // Update job
+          await supabase
+            .from("transcoding_jobs")
+            .update({
+              status: "completed",
+              progress: 100,
+              source_url: manifestUrl,
+              completed_at: new Date().toISOString(),
+            })
+            .eq("id", job.id);
         }
-
-        // Get manifest URL
-        const { data: { publicUrl: manifestUrl } } = supabase.storage
-          .from("transcoded-videos")
-          .getPublicUrl(manifestPath);
-
-        // Create output records for all variants
-        for (const variant of variants) {
-          await supabase.from("transcoded_outputs").insert({
-            job_id: job.id,
-            manifest_url: manifestUrl,
-            quality_variant: variant.resolution,
-            bitrate: variant.bitrate,
-            resolution: variant.resolution === "360p" ? "640x360" :
-                        variant.resolution === "480p" ? "854x480" :
-                        variant.resolution === "720p" ? "1280x720" : "1920x1080",
-          });
-        }
-
-        // Update job
-        await supabase
-          .from("transcoding_jobs")
-          .update({
-            status: "completed",
-            progress: 100,
-            source_url: manifestUrl,
-            completed_at: new Date().toISOString(),
-          })
-          .eq("id", job.id);
       }
 
       toast({
-        title: "Transcoding completed!",
-        description: "Your video has been successfully transcoded",
+        title: "Batch transcoding completed!",
+        description: `Successfully transcoded ${selectedFiles.length} file(s)`,
       });
 
       setProgress(100);
@@ -264,18 +277,20 @@ const SubmitJobFunctional = () => {
                   <label
                     htmlFor="file"
                     className={`flex flex-col items-center justify-center w-full h-64 border-2 border-dashed rounded-lg cursor-pointer transition-colors ${
-                      selectedFile
+                      selectedFiles.length > 0
                         ? "bg-primary/10 border-primary"
                         : "bg-muted/20 hover:bg-muted/40 border-border"
                     }`}
                   >
                     <div className="flex flex-col items-center justify-center pt-5 pb-6">
                       <Video className="w-12 h-12 mb-4 text-muted-foreground" />
-                      {selectedFile ? (
+                      {selectedFiles.length > 0 ? (
                         <>
-                          <p className="mb-2 text-sm font-semibold">{selectedFile.name}</p>
+                          <p className="mb-2 text-sm font-semibold">
+                            {selectedFiles.length} file(s) selected
+                          </p>
                           <p className="text-xs text-muted-foreground">
-                            {(selectedFile.size / 1024 / 1024).toFixed(2)} MB
+                            {(selectedFiles.reduce((acc, f) => acc + f.size, 0) / 1024 / 1024).toFixed(2)} MB total
                           </p>
                         </>
                       ) : (
@@ -296,6 +311,7 @@ const SubmitJobFunctional = () => {
                       accept="video/*,audio/*"
                       onChange={handleFileSelect}
                       disabled={isTranscoding}
+                      multiple
                     />
                   </label>
                 </div>
@@ -327,7 +343,9 @@ const SubmitJobFunctional = () => {
               {isTranscoding && (
                 <div className="space-y-2">
                   <div className="flex justify-between text-sm">
-                    <span className="text-muted-foreground">Transcoding Progress</span>
+                    <span className="text-muted-foreground">
+                      Transcoding Progress (File {currentFileIndex}/{selectedFiles.length})
+                    </span>
                     <span className="font-medium">{progress}%</span>
                   </div>
                   <Progress value={progress} className="h-2" />
@@ -341,7 +359,7 @@ const SubmitJobFunctional = () => {
                 type="submit"
                 className="w-full"
                 size="lg"
-                disabled={!selectedFile || isTranscoding}
+                disabled={selectedFiles.length === 0 || isTranscoding}
               >
                 {isTranscoding ? (
                   <>

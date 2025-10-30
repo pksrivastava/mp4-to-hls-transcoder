@@ -55,6 +55,7 @@ export const useFFmpeg = () => {
 
       // Define quality variants with optimized settings for speed
       const variants = [
+        { name: "240p", scale: "426:240", bitrate: "400k", audioBitrate: "64k" },
         { name: "360p", scale: "640:360", bitrate: "800k", audioBitrate: "96k" },
         { name: "480p", scale: "854:480", bitrate: "1400k", audioBitrate: "128k" },
         { name: "720p", scale: "1280:720", bitrate: "2500k", audioBitrate: "128k" },
@@ -114,7 +115,8 @@ export const useFFmpeg = () => {
       // Create master playlist
       let masterPlaylist = "#EXTM3U\n#EXT-X-VERSION:3\n\n";
       for (const variant of variantResults) {
-        const [width, height] = variant.resolution === "360p" ? [640, 360] :
+        const [width, height] = variant.resolution === "240p" ? [426, 240] :
+                                 variant.resolution === "360p" ? [640, 360] :
                                  variant.resolution === "480p" ? [854, 480] :
                                  variant.resolution === "720p" ? [1280, 720] : [1920, 1080];
         masterPlaylist += `#EXT-X-STREAM-INF:BANDWIDTH=${variant.bitrate},RESOLUTION=${width}x${height}\n`;
@@ -154,12 +156,13 @@ export const useFFmpeg = () => {
       // Create DASH with multiple representations using map
       await ffmpeg.exec([
         "-i", "input.mp4",
-        "-map", "0:v", "-map", "0:v", "-map", "0:v", "-map", "0:v",
+        "-map", "0:v", "-map", "0:v", "-map", "0:v", "-map", "0:v", "-map", "0:v",
         "-map", "0:a",
-        "-c:v:0", "libx264", "-preset", "veryfast", "-s:v:0", "640x360", "-b:v:0", "800k",
-        "-c:v:1", "libx264", "-preset", "veryfast", "-s:v:1", "854x480", "-b:v:1", "1400k",
-        "-c:v:2", "libx264", "-preset", "veryfast", "-s:v:2", "1280x720", "-b:v:2", "2500k",
-        "-c:v:3", "libx264", "-preset", "veryfast", "-s:v:3", "1920x1080", "-b:v:3", "5000k",
+        "-c:v:0", "libx264", "-preset", "veryfast", "-s:v:0", "426x240", "-b:v:0", "400k",
+        "-c:v:1", "libx264", "-preset", "veryfast", "-s:v:1", "640x360", "-b:v:1", "800k",
+        "-c:v:2", "libx264", "-preset", "veryfast", "-s:v:2", "854x480", "-b:v:2", "1400k",
+        "-c:v:3", "libx264", "-preset", "veryfast", "-s:v:3", "1280x720", "-b:v:3", "2500k",
+        "-c:v:4", "libx264", "-preset", "veryfast", "-s:v:4", "1920x1080", "-b:v:4", "5000k",
         "-c:a", "aac", "-b:a", "128k",
         "-seg_duration", "4",
         "-use_timeline", "1",
@@ -197,6 +200,7 @@ export const useFFmpeg = () => {
       }
 
       const variants = [
+        { resolution: "240p", bitrate: 400000 },
         { resolution: "360p", bitrate: 800000 },
         { resolution: "480p", bitrate: 1400000 },
         { resolution: "720p", bitrate: 2500000 },

@@ -102,6 +102,7 @@ const DashboardFunctional = () => {
   };
 
   const [selectedQualities, setSelectedQualities] = useState<Array<{ label: string; url: string }>>([]);
+  const [selectedSubtitles, setSelectedSubtitles] = useState<Array<{ label: string; url: string; language: string }>>([]);
 
   const handleViewJob = async (id: string) => {
     const job = jobs.find((j) => j.id === id);
@@ -112,18 +113,43 @@ const DashboardFunctional = () => {
         .select("manifest_url, quality_variant")
         .eq("job_id", id);
 
+      // Fetch subtitles/transcripts for this job
+      const { data: transcripts } = await supabase
+        .from("transcripts")
+        .select("content, language, format")
+        .eq("job_id", id);
+
       if (outputs && outputs.length > 0) {
         const qualities = outputs.map(output => ({
           label: output.quality_variant,
           url: output.manifest_url,
         }));
         setSelectedQualities(qualities);
+        
+        // Convert transcripts to subtitle format (if available)
+        if (transcripts && transcripts.length > 0) {
+          const subtitleUrls = transcripts.map(transcript => {
+            // Create a blob URL for the subtitle content
+            const blob = new Blob([transcript.content], { type: 'text/vtt' });
+            const url = URL.createObjectURL(blob);
+            return {
+              label: transcript.language.toUpperCase(),
+              url: url,
+              language: transcript.language,
+            };
+          });
+          setSelectedSubtitles(subtitleUrls);
+        } else {
+          setSelectedSubtitles([]);
+        }
+        
         setSelectedJobUrl(outputs[0].manifest_url);
         setIsPreviewOpen(true);
       } else if (job.source_url) {
         // Fallback to source if no outputs
         setSelectedJobUrl(job.source_url);
         setSelectedQualities([]);
+        setSelectedSubtitles([]);
         setIsPreviewOpen(true);
       } else {
         toast({
@@ -142,20 +168,37 @@ const DashboardFunctional = () => {
   const handleDownload = async (id: string) => {
     const { data, error } = await supabase
       .from("transcoded_outputs")
-      .select("manifest_url")
-      .eq("job_id", id)
-      .single();
+      .select("manifest_url, quality_variant")
+      .eq("job_id", id);
 
-    if (error || !data) {
+    if (error || !data || data.length === 0) {
       toast({
         title: "Download failed",
-        description: "Could not retrieve download URL",
+        description: "Could not retrieve download URLs",
         variant: "destructive",
       });
       return;
     }
 
-    window.open(data.manifest_url, "_blank");
+    // Create a downloadable text file with all URLs
+    const urlList = data.map(output => 
+      `${output.quality_variant}: ${output.manifest_url}`
+    ).join('\n');
+    
+    const blob = new Blob([urlList], { type: 'text/plain' });
+    const url = window.URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `transcoded_urls_${id}.txt`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    window.URL.revokeObjectURL(url);
+
+    toast({
+      title: "Download started",
+      description: `Downloaded URLs for ${data.length} quality variants`,
+    });
   };
 
   const handleDelete = async (id: string) => {
@@ -276,6 +319,7 @@ const DashboardFunctional = () => {
             <VideoPreview 
               videoUrl={selectedJobUrl} 
               qualities={selectedQualities.length > 0 ? selectedQualities : undefined}
+              subtitles={selectedSubtitles.length > 0 ? selectedSubtitles : undefined}
             />
           )}
         </DialogContent>
