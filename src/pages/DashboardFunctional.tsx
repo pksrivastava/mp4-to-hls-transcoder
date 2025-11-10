@@ -5,6 +5,7 @@ import { Activity, FileVideo, CheckCircle2, AlertCircle } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { VideoPreview } from "@/components/VideoPreview";
+import JSZip from "jszip";
 import {
   Dialog,
   DialogContent,
@@ -166,39 +167,132 @@ const DashboardFunctional = () => {
   };
 
   const handleDownload = async (id: string) => {
-    const { data, error } = await supabase
-      .from("transcoded_outputs")
-      .select("manifest_url, quality_variant")
-      .eq("job_id", id);
-
-    if (error || !data || data.length === 0) {
-      toast({
-        title: "Download failed",
-        description: "Could not retrieve download URLs",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    // Create a downloadable text file with all URLs
-    const urlList = data.map(output => 
-      `${output.quality_variant}: ${output.manifest_url}`
-    ).join('\n');
-    
-    const blob = new Blob([urlList], { type: 'text/plain' });
-    const url = window.URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `transcoded_urls_${id}.txt`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    window.URL.revokeObjectURL(url);
+    const job = jobs.find((j) => j.id === id);
+    if (!job) return;
 
     toast({
-      title: "Download started",
-      description: `Downloaded URLs for ${data.length} quality variants`,
+      title: "Preparing download",
+      description: "Fetching transcoded files...",
     });
+
+    try {
+      const { data: outputs, error } = await supabase
+        .from("transcoded_outputs")
+        .select("manifest_url, quality_variant")
+        .eq("job_id", id);
+
+      if (error || !outputs || outputs.length === 0) {
+        toast({
+          title: "Download failed",
+          description: "Could not retrieve transcoded files",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      // Fetch transcripts as well
+      const { data: transcripts } = await supabase
+        .from("transcripts")
+        .select("content, language, format")
+        .eq("job_id", id);
+
+      const zip = new JSZip();
+      
+      // Download all manifest and segment files
+      for (const output of outputs) {
+        const qualityFolder = zip.folder(output.quality_variant);
+        if (!qualityFolder) continue;
+
+        try {
+          // Fetch the manifest file
+          const manifestResponse = await fetch(output.manifest_url);
+          const manifestText = await manifestResponse.text();
+          
+          // Determine file extension based on format
+          const isHLS = job.format === "HLS";
+          const manifestExtension = isHLS ? "m3u8" : "mpd";
+          qualityFolder.file(`manifest.${manifestExtension}`, manifestText);
+
+          // Parse manifest to get segment URLs
+          const segmentUrls = parseManifestForSegments(manifestText, output.manifest_url, isHLS);
+          
+          // Download all segments
+          for (let i = 0; i < segmentUrls.length; i++) {
+            const segmentUrl = segmentUrls[i];
+            const segmentResponse = await fetch(segmentUrl);
+            const segmentBlob = await segmentResponse.blob();
+            const segmentName = segmentUrl.split('/').pop() || `segment_${i}`;
+            qualityFolder.file(segmentName, segmentBlob);
+          }
+        } catch (err) {
+          console.error(`Error downloading ${output.quality_variant}:`, err);
+        }
+      }
+
+      // Add transcripts/subtitles to the zip
+      if (transcripts && transcripts.length > 0) {
+        const subtitlesFolder = zip.folder("subtitles");
+        transcripts.forEach((transcript) => {
+          subtitlesFolder?.file(
+            `${transcript.language}.${transcript.format}`,
+            transcript.content
+          );
+        });
+      }
+
+      // Generate and download the zip file
+      const zipBlob = await zip.generateAsync({ type: "blob" });
+      const url = window.URL.createObjectURL(zipBlob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `${job.file_name}_transcoded.zip`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+
+      toast({
+        title: "Download complete",
+        description: `Downloaded ${outputs.length} quality variants`,
+      });
+    } catch (err) {
+      console.error("Download error:", err);
+      toast({
+        title: "Download failed",
+        description: err instanceof Error ? err.message : "An error occurred",
+        variant: "destructive",
+      });
+    }
+  };
+
+  // Helper function to parse manifest files and extract segment URLs
+  const parseManifestForSegments = (manifestContent: string, manifestUrl: string, isHLS: boolean): string[] => {
+    const baseUrl = manifestUrl.substring(0, manifestUrl.lastIndexOf('/') + 1);
+    const lines = manifestContent.split('\n');
+    const segments: string[] = [];
+
+    if (isHLS) {
+      // Parse HLS manifest (m3u8)
+      for (const line of lines) {
+        const trimmed = line.trim();
+        // Skip comments and empty lines
+        if (!trimmed || trimmed.startsWith('#')) continue;
+        // This is a segment file
+        if (trimmed.endsWith('.ts') || trimmed.endsWith('.m4s') || trimmed.includes('.ts?') || trimmed.includes('.m4s?')) {
+          segments.push(trimmed.startsWith('http') ? trimmed : baseUrl + trimmed);
+        }
+      }
+    } else {
+      // Parse DASH manifest (mpd) - simplified version
+      const segmentRegex = /media="([^"]+)"/g;
+      let match;
+      while ((match = segmentRegex.exec(manifestContent)) !== null) {
+        const segmentPath = match[1];
+        segments.push(segmentPath.startsWith('http') ? segmentPath : baseUrl + segmentPath);
+      }
+    }
+
+    return segments;
   };
 
   const handleDelete = async (id: string) => {
