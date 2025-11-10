@@ -21,8 +21,11 @@ const ApiDocs = () => {
               <h2 className="text-2xl font-semibold">Base URL</h2>
             </div>
             <div className="bg-muted/50 p-4 rounded-lg font-mono text-sm">
-              https://api.transcoder.pro/v1
+              {import.meta.env.VITE_SUPABASE_URL}/functions/v1/transcoding-api
             </div>
+            <p className="text-sm text-muted-foreground mt-2">
+              Use your Supabase auth token for authentication
+            </p>
           </Card>
 
           <Tabs defaultValue="transcode" className="w-full">
@@ -38,7 +41,7 @@ const ApiDocs = () => {
                 <div className="mb-4">
                   <div className="flex items-center gap-2 mb-2">
                     <Badge className="bg-processing">POST</Badge>
-                    <code className="text-sm">/transcode/start</code>
+                    <code className="text-sm">/transcoding-api/submit</code>
                   </div>
                   <p className="text-muted-foreground">Submit a new transcoding job</p>
                 </div>
@@ -77,7 +80,7 @@ const ApiDocs = () => {
                 <div className="mb-4">
                   <div className="flex items-center gap-2 mb-2">
                     <Badge className="bg-success">GET</Badge>
-                    <code className="text-sm">/transcode/status/:job_id</code>
+                    <code className="text-sm">/transcoding-api/status?job_id=xxx</code>
                   </div>
                   <p className="text-muted-foreground">Check the status of a transcoding job</p>
                 </div>

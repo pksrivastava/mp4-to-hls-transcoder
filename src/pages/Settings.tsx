@@ -1,12 +1,76 @@
+import { useState, useEffect } from "react";
 import { Card } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Separator } from "@/components/ui/separator";
-import { Settings as SettingsIcon, Key, Bell, Database } from "lucide-react";
+import { Settings as SettingsIcon, Key, Bell, Database, Trash2 } from "lucide-react";
+import { supabase } from "@/integrations/supabase/client";
+import { useToast } from "@/hooks/use-toast";
+import { Progress } from "@/components/ui/progress";
 
 const Settings = () => {
+  const [autoCleanup, setAutoCleanup] = useState(false);
+  const [storageStats, setStorageStats] = useState({
+    totalJobs: 0,
+    completedJobs: 0,
+    estimatedStorage: 0,
+  });
+  const { toast } = useToast();
+
+  useEffect(() => {
+    fetchStorageStats();
+  }, []);
+
+  const fetchStorageStats = async () => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+
+    const { data: jobs } = await supabase
+      .from("transcoding_jobs")
+      .select("status")
+      .eq("user_id", user.id);
+
+    if (jobs) {
+      const completed = jobs.filter((j) => j.status === "completed").length;
+      setStorageStats({
+        totalJobs: jobs.length,
+        completedJobs: completed,
+        estimatedStorage: completed * 50, // 50MB per job estimate
+      });
+    }
+  };
+
+  const handleCleanupOldJobs = async () => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+
+    const { error } = await supabase
+      .from("transcoding_jobs")
+      .delete()
+      .eq("user_id", user.id)
+      .eq("status", "completed")
+      .lt("completed_at", thirtyDaysAgo.toISOString());
+
+    if (error) {
+      toast({
+        title: "Cleanup failed",
+        description: error.message,
+        variant: "destructive",
+      });
+    } else {
+      toast({
+        title: "Cleanup complete",
+        description: "Old completed jobs have been removed",
+      });
+      fetchStorageStats();
+    }
+  };
+
   return (
     <div className="min-h-screen bg-background">
       <div className="container mx-auto px-4 py-8 max-w-4xl">
@@ -131,21 +195,39 @@ const Settings = () => {
           <Card className="p-6">
             <div className="flex items-center gap-3 mb-6">
               <Database className="w-5 h-5 text-primary" />
-              <h2 className="text-xl font-semibold">Storage</h2>
+              <h2 className="text-xl font-semibold">Storage Management</h2>
             </div>
 
-            <div className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="storage-location">Storage Location</Label>
-                <Input
-                  id="storage-location"
-                  value="/var/transcoder/media"
-                  readOnly
-                />
-                <p className="text-xs text-muted-foreground">
-                  Local or cloud storage path for transcoded files
-                </p>
+            <div className="space-y-6">
+              <div className="space-y-4">
+                <div className="grid grid-cols-3 gap-4">
+                  <div className="space-y-1">
+                    <p className="text-sm text-muted-foreground">Total Jobs</p>
+                    <p className="text-2xl font-bold">{storageStats.totalJobs}</p>
+                  </div>
+                  <div className="space-y-1">
+                    <p className="text-sm text-muted-foreground">Completed</p>
+                    <p className="text-2xl font-bold">{storageStats.completedJobs}</p>
+                  </div>
+                  <div className="space-y-1">
+                    <p className="text-sm text-muted-foreground">Est. Storage</p>
+                    <p className="text-2xl font-bold">{storageStats.estimatedStorage}MB</p>
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <div className="flex justify-between text-sm">
+                    <span className="text-muted-foreground">Storage Used</span>
+                    <span className="font-medium">{Math.min((storageStats.estimatedStorage / 5000) * 100, 100).toFixed(1)}%</span>
+                  </div>
+                  <Progress value={Math.min((storageStats.estimatedStorage / 5000) * 100, 100)} />
+                  <p className="text-xs text-muted-foreground">
+                    {storageStats.estimatedStorage} MB of 5000 MB used
+                  </p>
+                </div>
               </div>
+
+              <Separator />
 
               <div className="flex items-center justify-between">
                 <div className="space-y-0.5">
@@ -154,8 +236,17 @@ const Settings = () => {
                     Automatically delete completed jobs after 30 days
                   </p>
                 </div>
-                <Switch />
+                <Switch checked={autoCleanup} onCheckedChange={setAutoCleanup} />
               </div>
+
+              <Button
+                variant="destructive"
+                className="w-full"
+                onClick={handleCleanupOldJobs}
+              >
+                <Trash2 className="w-4 h-4 mr-2" />
+                Clean Up Jobs Older Than 30 Days
+              </Button>
             </div>
           </Card>
 

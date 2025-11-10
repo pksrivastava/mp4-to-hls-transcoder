@@ -1,11 +1,11 @@
 import { useState, useEffect } from "react";
 import { Card } from "@/components/ui/card";
 import { JobCard } from "@/components/JobCard";
-import { Activity, FileVideo, CheckCircle2, AlertCircle } from "lucide-react";
+import { Activity, FileVideo, CheckCircle2, AlertCircle, HardDrive } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { VideoPreview } from "@/components/VideoPreview";
-import JSZip from "jszip";
+import { SelectiveDownloadDialog } from "@/components/SelectiveDownloadDialog";
 import {
   Dialog,
   DialogContent,
@@ -30,9 +30,16 @@ const DashboardFunctional = () => {
     total: 0,
     completedToday: 0,
     failed: 0,
+    storageUsed: 0,
   });
   const [selectedJobUrl, setSelectedJobUrl] = useState<string | null>(null);
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
+  const [downloadDialogOpen, setDownloadDialogOpen] = useState(false);
+  const [selectedJobForDownload, setSelectedJobForDownload] = useState<{
+    qualities: Array<{ quality_variant: string; manifest_url: string }>;
+    fileName: string;
+    format: "HLS" | "DASH";
+  } | null>(null);
   const { toast } = useToast();
 
   useEffect(() => {
@@ -93,11 +100,15 @@ const DashboardFunctional = () => {
           new Date(j.created_at) >= today
       ).length;
 
+      // Calculate storage usage (estimate based on completed jobs)
+      const storageEstimate = completed * 50; // Rough estimate: 50MB per job
+
       setStats({
         active,
         total: data.length,
         completedToday,
         failed,
+        storageUsed: storageEstimate,
       });
     }
   };
@@ -170,129 +181,27 @@ const DashboardFunctional = () => {
     const job = jobs.find((j) => j.id === id);
     if (!job) return;
 
-    toast({
-      title: "Preparing download",
-      description: "Fetching transcoded files...",
-    });
+    const { data: outputs, error } = await supabase
+      .from("transcoded_outputs")
+      .select("manifest_url, quality_variant")
+      .eq("job_id", id);
 
-    try {
-      const { data: outputs, error } = await supabase
-        .from("transcoded_outputs")
-        .select("manifest_url, quality_variant")
-        .eq("job_id", id);
-
-      if (error || !outputs || outputs.length === 0) {
-        toast({
-          title: "Download failed",
-          description: "Could not retrieve transcoded files",
-          variant: "destructive",
-        });
-        return;
-      }
-
-      // Fetch transcripts as well
-      const { data: transcripts } = await supabase
-        .from("transcripts")
-        .select("content, language, format")
-        .eq("job_id", id);
-
-      const zip = new JSZip();
-      
-      // Download all manifest and segment files
-      for (const output of outputs) {
-        const qualityFolder = zip.folder(output.quality_variant);
-        if (!qualityFolder) continue;
-
-        try {
-          // Fetch the manifest file
-          const manifestResponse = await fetch(output.manifest_url);
-          const manifestText = await manifestResponse.text();
-          
-          // Determine file extension based on format
-          const isHLS = job.format === "HLS";
-          const manifestExtension = isHLS ? "m3u8" : "mpd";
-          qualityFolder.file(`manifest.${manifestExtension}`, manifestText);
-
-          // Parse manifest to get segment URLs
-          const segmentUrls = parseManifestForSegments(manifestText, output.manifest_url, isHLS);
-          
-          // Download all segments
-          for (let i = 0; i < segmentUrls.length; i++) {
-            const segmentUrl = segmentUrls[i];
-            const segmentResponse = await fetch(segmentUrl);
-            const segmentBlob = await segmentResponse.blob();
-            const segmentName = segmentUrl.split('/').pop() || `segment_${i}`;
-            qualityFolder.file(segmentName, segmentBlob);
-          }
-        } catch (err) {
-          console.error(`Error downloading ${output.quality_variant}:`, err);
-        }
-      }
-
-      // Add transcripts/subtitles to the zip
-      if (transcripts && transcripts.length > 0) {
-        const subtitlesFolder = zip.folder("subtitles");
-        transcripts.forEach((transcript) => {
-          subtitlesFolder?.file(
-            `${transcript.language}.${transcript.format}`,
-            transcript.content
-          );
-        });
-      }
-
-      // Generate and download the zip file
-      const zipBlob = await zip.generateAsync({ type: "blob" });
-      const url = window.URL.createObjectURL(zipBlob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = `${job.file_name}_transcoded.zip`;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      window.URL.revokeObjectURL(url);
-
-      toast({
-        title: "Download complete",
-        description: `Downloaded ${outputs.length} quality variants`,
-      });
-    } catch (err) {
-      console.error("Download error:", err);
+    if (error || !outputs || outputs.length === 0) {
       toast({
         title: "Download failed",
-        description: err instanceof Error ? err.message : "An error occurred",
+        description: "Could not retrieve transcoded files",
         variant: "destructive",
       });
-    }
-  };
-
-  // Helper function to parse manifest files and extract segment URLs
-  const parseManifestForSegments = (manifestContent: string, manifestUrl: string, isHLS: boolean): string[] => {
-    const baseUrl = manifestUrl.substring(0, manifestUrl.lastIndexOf('/') + 1);
-    const lines = manifestContent.split('\n');
-    const segments: string[] = [];
-
-    if (isHLS) {
-      // Parse HLS manifest (m3u8)
-      for (const line of lines) {
-        const trimmed = line.trim();
-        // Skip comments and empty lines
-        if (!trimmed || trimmed.startsWith('#')) continue;
-        // This is a segment file
-        if (trimmed.endsWith('.ts') || trimmed.endsWith('.m4s') || trimmed.includes('.ts?') || trimmed.includes('.m4s?')) {
-          segments.push(trimmed.startsWith('http') ? trimmed : baseUrl + trimmed);
-        }
-      }
-    } else {
-      // Parse DASH manifest (mpd) - simplified version
-      const segmentRegex = /media="([^"]+)"/g;
-      let match;
-      while ((match = segmentRegex.exec(manifestContent)) !== null) {
-        const segmentPath = match[1];
-        segments.push(segmentPath.startsWith('http') ? segmentPath : baseUrl + segmentPath);
-      }
+      return;
     }
 
-    return segments;
+    // Open selective download dialog
+    setSelectedJobForDownload({
+      qualities: outputs,
+      fileName: job.file_name,
+      format: job.format,
+    });
+    setDownloadDialogOpen(true);
   };
 
   const handleDelete = async (id: string) => {
@@ -342,6 +251,12 @@ const DashboardFunctional = () => {
       value: stats.failed.toString(),
       icon: AlertCircle,
       color: "text-destructive",
+    },
+    {
+      label: "Storage Used",
+      value: `${stats.storageUsed}MB`,
+      icon: HardDrive,
+      color: "text-primary",
     },
   ];
 
@@ -418,6 +333,16 @@ const DashboardFunctional = () => {
           )}
         </DialogContent>
       </Dialog>
+
+      {selectedJobForDownload && (
+        <SelectiveDownloadDialog
+          open={downloadDialogOpen}
+          onOpenChange={setDownloadDialogOpen}
+          qualities={selectedJobForDownload.qualities}
+          fileName={selectedJobForDownload.fileName}
+          format={selectedJobForDownload.format}
+        />
+      )}
     </div>
   );
 };
