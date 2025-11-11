@@ -207,6 +207,92 @@ Deno.serve(async (req) => {
       )
     }
 
+    // DELETE /transcoding-api/bulk-delete - Delete multiple jobs
+    if (req.method === 'DELETE' && path === 'bulk-delete') {
+      const body: { job_ids: string[] } = await req.json()
+      
+      if (!body.job_ids || !Array.isArray(body.job_ids) || body.job_ids.length === 0) {
+        return new Response(
+          JSON.stringify({ error: 'job_ids array required' }),
+          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
+
+      const { error } = await supabaseClient
+        .from('transcoding_jobs')
+        .delete()
+        .in('id', body.job_ids)
+        .eq('user_id', user.id)
+
+      if (error) {
+        return new Response(
+          JSON.stringify({ error: error.message }),
+          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
+
+      return new Response(
+        JSON.stringify({ 
+          message: `${body.job_ids.length} job(s) deleted successfully`,
+          deleted_count: body.job_ids.length 
+        }),
+        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
+    // POST /transcoding-api/bulk-download - Get download info for multiple jobs
+    if (req.method === 'POST' && path === 'bulk-download') {
+      const body: { job_ids: string[] } = await req.json()
+      
+      if (!body.job_ids || !Array.isArray(body.job_ids) || body.job_ids.length === 0) {
+        return new Response(
+          JSON.stringify({ error: 'job_ids array required' }),
+          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
+
+      // Verify all jobs belong to user
+      const { data: jobs, error: jobsError } = await supabaseClient
+        .from('transcoding_jobs')
+        .select('id, file_name, format, status')
+        .in('id', body.job_ids)
+        .eq('user_id', user.id)
+
+      if (jobsError) {
+        return new Response(
+          JSON.stringify({ error: jobsError.message }),
+          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
+
+      // Get outputs for all jobs
+      const downloadData = []
+      for (const job of jobs || []) {
+        const { data: outputs } = await supabaseClient
+          .from('transcoded_outputs')
+          .select('*')
+          .eq('job_id', job.id)
+
+        if (outputs && outputs.length > 0) {
+          downloadData.push({
+            job_id: job.id,
+            file_name: job.file_name,
+            format: job.format,
+            status: job.status,
+            outputs: outputs
+          })
+        }
+      }
+
+      return new Response(
+        JSON.stringify({ 
+          jobs: downloadData,
+          total_jobs: downloadData.length
+        }),
+        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
+    }
+
     return new Response(
       JSON.stringify({ error: 'Endpoint not found' }),
       { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }

@@ -2,6 +2,7 @@ import { Card } from "@/components/ui/card";
 import { StatusBadge } from "./StatusBadge";
 import { Progress } from "@/components/ui/progress";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Eye, Download, Trash2 } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 
@@ -15,6 +16,8 @@ interface JobCardProps {
   onView: (id: string) => void;
   onDownload: (id: string) => void;
   onDelete: (id: string) => void;
+  isSelected?: boolean;
+  onSelectionChange?: (id: string, selected: boolean) => void;
 }
 
 export const JobCard = ({
@@ -27,10 +30,19 @@ export const JobCard = ({
   onView,
   onDownload,
   onDelete,
+  isSelected,
+  onSelectionChange,
 }: JobCardProps) => {
   return (
     <Card className="p-6 hover:shadow-glow transition-all duration-300">
-      <div className="flex justify-between items-start mb-4">
+      <div className="flex justify-between items-start mb-4 gap-3">
+        {onSelectionChange && (
+          <Checkbox
+            checked={isSelected}
+            onCheckedChange={(checked) => onSelectionChange(id, checked as boolean)}
+            className="mt-1"
+          />
+        )}
         <div className="flex-1 min-w-0">
           <h3 className="font-semibold text-lg truncate mb-1">{fileName}</h3>
           <p className="text-sm text-muted-foreground">

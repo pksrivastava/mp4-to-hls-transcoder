@@ -1,7 +1,9 @@
 import { useState, useEffect } from "react";
 import { Card } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { JobCard } from "@/components/JobCard";
-import { Activity, FileVideo, CheckCircle2, AlertCircle, HardDrive } from "lucide-react";
+import { Activity, FileVideo, CheckCircle2, AlertCircle, HardDrive, Download, Trash2 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { VideoPreview } from "@/components/VideoPreview";
@@ -12,6 +14,16 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 interface Job {
   id: string;
@@ -36,10 +48,15 @@ const DashboardFunctional = () => {
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
   const [downloadDialogOpen, setDownloadDialogOpen] = useState(false);
   const [selectedJobForDownload, setSelectedJobForDownload] = useState<{
-    qualities: Array<{ quality_variant: string; manifest_url: string }>;
-    fileName: string;
-    format: "HLS" | "DASH";
+    jobs: Array<{
+      id: string;
+      qualities: Array<{ quality_variant: string; manifest_url: string }>;
+      fileName: string;
+      format: "HLS" | "DASH";
+    }>;
   } | null>(null);
+  const [selectedJobIds, setSelectedJobIds] = useState<Set<string>>(new Set());
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const { toast } = useToast();
 
   useEffect(() => {
@@ -197,11 +214,95 @@ const DashboardFunctional = () => {
 
     // Open selective download dialog
     setSelectedJobForDownload({
-      qualities: outputs,
-      fileName: job.file_name,
-      format: job.format,
+      jobs: [{
+        id,
+        qualities: outputs,
+        fileName: job.file_name,
+        format: job.format,
+      }]
     });
     setDownloadDialogOpen(true);
+  };
+
+  const handleBulkDownload = async () => {
+    if (selectedJobIds.size === 0) return;
+
+    const jobsToDownload = [];
+    for (const jobId of selectedJobIds) {
+      const job = jobs.find((j) => j.id === jobId);
+      if (!job || job.status !== "completed") continue;
+
+      const { data: outputs } = await supabase
+        .from("transcoded_outputs")
+        .select("manifest_url, quality_variant")
+        .eq("job_id", jobId);
+
+      if (outputs && outputs.length > 0) {
+        jobsToDownload.push({
+          id: jobId,
+          qualities: outputs,
+          fileName: job.file_name,
+          format: job.format,
+        });
+      }
+    }
+
+    if (jobsToDownload.length === 0) {
+      toast({
+        title: "No files to download",
+        description: "Selected jobs have no completed outputs",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setSelectedJobForDownload({ jobs: jobsToDownload });
+    setDownloadDialogOpen(true);
+  };
+
+  const handleBulkDelete = async () => {
+    if (selectedJobIds.size === 0) return;
+    
+    const { error } = await supabase
+      .from("transcoding_jobs")
+      .delete()
+      .in("id", Array.from(selectedJobIds));
+
+    if (error) {
+      toast({
+        title: "Delete failed",
+        description: error.message,
+        variant: "destructive",
+      });
+      return;
+    }
+
+    toast({
+      title: "Jobs deleted",
+      description: `${selectedJobIds.size} job(s) have been deleted`,
+    });
+
+    setSelectedJobIds(new Set());
+    setDeleteDialogOpen(false);
+    fetchJobs();
+  };
+
+  const handleSelectionChange = (id: string, selected: boolean) => {
+    const newSelection = new Set(selectedJobIds);
+    if (selected) {
+      newSelection.add(id);
+    } else {
+      newSelection.delete(id);
+    }
+    setSelectedJobIds(newSelection);
+  };
+
+  const handleSelectAll = (checked: boolean) => {
+    if (checked) {
+      setSelectedJobIds(new Set(jobs.map(j => j.id)));
+    } else {
+      setSelectedJobIds(new Set());
+    }
   };
 
   const handleDelete = async (id: string) => {
@@ -287,8 +388,42 @@ const DashboardFunctional = () => {
           })}
         </div>
 
-        <div className="mb-6">
-          <h2 className="text-2xl font-semibold mb-4">Recent Jobs</h2>
+        <div className="mb-6 flex items-center justify-between">
+          <div className="flex items-center gap-4">
+            <h2 className="text-2xl font-semibold">Recent Jobs</h2>
+            {jobs.length > 0 && (
+              <div className="flex items-center gap-2">
+                <Checkbox
+                  checked={selectedJobIds.size === jobs.length && jobs.length > 0}
+                  onCheckedChange={handleSelectAll}
+                />
+                <span className="text-sm text-muted-foreground">
+                  Select All ({selectedJobIds.size} selected)
+                </span>
+              </div>
+            )}
+          </div>
+          {selectedJobIds.size > 0 && (
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleBulkDownload}
+                disabled={!Array.from(selectedJobIds).some(id => jobs.find(j => j.id === id)?.status === "completed")}
+              >
+                <Download className="w-4 h-4 mr-2" />
+                Download Selected ({selectedJobIds.size})
+              </Button>
+              <Button
+                variant="destructive"
+                size="sm"
+                onClick={() => setDeleteDialogOpen(true)}
+              >
+                <Trash2 className="w-4 h-4 mr-2" />
+                Delete Selected ({selectedJobIds.size})
+              </Button>
+            </div>
+          )}
         </div>
 
         {jobs.length === 0 ? (
@@ -313,11 +448,31 @@ const DashboardFunctional = () => {
                 onView={handleViewJob}
                 onDownload={handleDownload}
                 onDelete={handleDelete}
+                isSelected={selectedJobIds.has(job.id)}
+                onSelectionChange={handleSelectionChange}
               />
             ))}
           </div>
         )}
       </div>
+
+      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Selected Jobs?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will permanently delete {selectedJobIds.size} job(s) and all associated transcoded files.
+              This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleBulkDelete} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <Dialog open={isPreviewOpen} onOpenChange={setIsPreviewOpen}>
         <DialogContent className="max-w-4xl">
@@ -338,9 +493,7 @@ const DashboardFunctional = () => {
         <SelectiveDownloadDialog
           open={downloadDialogOpen}
           onOpenChange={setDownloadDialogOpen}
-          qualities={selectedJobForDownload.qualities}
-          fileName={selectedJobForDownload.fileName}
-          format={selectedJobForDownload.format}
+          jobs={selectedJobForDownload.jobs}
         />
       )}
     </div>

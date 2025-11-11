@@ -29,11 +29,12 @@ const ApiDocs = () => {
           </Card>
 
           <Tabs defaultValue="transcode" className="w-full">
-            <TabsList className="grid w-full grid-cols-4">
+            <TabsList className="grid w-full grid-cols-5">
               <TabsTrigger value="transcode">Transcode</TabsTrigger>
               <TabsTrigger value="status">Status</TabsTrigger>
               <TabsTrigger value="transcript">Transcript</TabsTrigger>
               <TabsTrigger value="media">Media</TabsTrigger>
+              <TabsTrigger value="bulk">Bulk Ops</TabsTrigger>
             </TabsList>
 
             <TabsContent value="transcode" className="space-y-6">
@@ -178,6 +179,85 @@ language: "en" | "es" | "fr" | ...`}
       "url": "https://cdn.example.com/subtitles/en.vtt"
     }
   ]
+}`}
+                    </pre>
+                  </div>
+                </div>
+              </Card>
+            </TabsContent>
+
+            <TabsContent value="bulk" className="space-y-6">
+              <Card className="p-6">
+                <div className="mb-4">
+                  <div className="flex items-center gap-2 mb-2">
+                    <Badge className="bg-destructive">DELETE</Badge>
+                    <code className="text-sm">/transcoding-api/bulk-delete</code>
+                  </div>
+                  <p className="text-muted-foreground">Delete multiple transcoding jobs at once</p>
+                </div>
+
+                <div className="space-y-4">
+                  <div>
+                    <h4 className="font-semibold mb-2">Request Body</h4>
+                    <pre className="bg-muted/50 p-4 rounded-lg overflow-x-auto text-sm">
+{`{
+  "job_ids": ["job_abc123", "job_def456", "job_ghi789"]
+}`}
+                    </pre>
+                  </div>
+
+                  <div>
+                    <h4 className="font-semibold mb-2">Response</h4>
+                    <pre className="bg-muted/50 p-4 rounded-lg overflow-x-auto text-sm">
+{`{
+  "message": "3 job(s) deleted successfully",
+  "deleted_count": 3
+}`}
+                    </pre>
+                  </div>
+                </div>
+              </Card>
+
+              <Card className="p-6">
+                <div className="mb-4">
+                  <div className="flex items-center gap-2 mb-2">
+                    <Badge className="bg-processing">POST</Badge>
+                    <code className="text-sm">/transcoding-api/bulk-download</code>
+                  </div>
+                  <p className="text-muted-foreground">Get download information for multiple jobs</p>
+                </div>
+
+                <div className="space-y-4">
+                  <div>
+                    <h4 className="font-semibold mb-2">Request Body</h4>
+                    <pre className="bg-muted/50 p-4 rounded-lg overflow-x-auto text-sm">
+{`{
+  "job_ids": ["job_abc123", "job_def456"]
+}`}
+                    </pre>
+                  </div>
+
+                  <div>
+                    <h4 className="font-semibold mb-2">Response</h4>
+                    <pre className="bg-muted/50 p-4 rounded-lg overflow-x-auto text-sm">
+{`{
+  "jobs": [
+    {
+      "job_id": "job_abc123",
+      "file_name": "video1.mp4",
+      "format": "HLS",
+      "status": "completed",
+      "outputs": [
+        {
+          "quality_variant": "720p",
+          "manifest_url": "https://...",
+          "bitrate": 2500000,
+          "resolution": "1280x720"
+        }
+      ]
+    }
+  ],
+  "total_jobs": 2
 }`}
                     </pre>
                   </div>
