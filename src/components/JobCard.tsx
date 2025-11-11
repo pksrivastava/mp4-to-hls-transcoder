@@ -3,7 +3,7 @@ import { StatusBadge } from "./StatusBadge";
 import { Progress } from "@/components/ui/progress";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Eye, Download, Trash2 } from "lucide-react";
+import { Eye, Download, Trash2, FileText } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 
 interface JobCardProps {
@@ -13,9 +13,11 @@ interface JobCardProps {
   progress?: number;
   createdAt: string;
   format: "HLS" | "DASH";
+  sourceUrl?: string;
   onView: (id: string) => void;
   onDownload: (id: string) => void;
   onDelete: (id: string) => void;
+  onTranscribe?: (id: string) => void;
   isSelected?: boolean;
   onSelectionChange?: (id: string, selected: boolean) => void;
 }
@@ -27,9 +29,11 @@ export const JobCard = ({
   progress = 0,
   createdAt,
   format,
+  sourceUrl,
   onView,
   onDownload,
   onDelete,
+  onTranscribe,
   isSelected,
   onSelectionChange,
 }: JobCardProps) => {
@@ -73,9 +77,16 @@ export const JobCard = ({
             <Eye className="w-4 h-4" />
           </Button>
           {status === "completed" && (
-            <Button size="sm" variant="outline" onClick={() => onDownload(id)}>
-              <Download className="w-4 h-4" />
-            </Button>
+            <>
+              <Button size="sm" variant="outline" onClick={() => onDownload(id)}>
+                <Download className="w-4 h-4" />
+              </Button>
+              {onTranscribe && sourceUrl && (
+                <Button size="sm" variant="outline" onClick={() => onTranscribe(id)}>
+                  <FileText className="w-4 h-4" />
+                </Button>
+              )}
+            </>
           )}
           <Button
             size="sm"

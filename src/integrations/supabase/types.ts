@@ -98,6 +98,7 @@ export type Database = {
         Row: {
           content: string
           created_at: string
+          embedding: string | null
           format: string
           id: string
           job_id: string
@@ -106,6 +107,7 @@ export type Database = {
         Insert: {
           content: string
           created_at?: string
+          embedding?: string | null
           format?: string
           id?: string
           job_id: string
@@ -114,6 +116,7 @@ export type Database = {
         Update: {
           content?: string
           created_at?: string
+          embedding?: string | null
           format?: string
           id?: string
           job_id?: string
@@ -134,7 +137,20 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      search_transcripts_by_similarity: {
+        Args: {
+          match_count?: number
+          match_threshold?: number
+          query_embedding: string
+        }
+        Returns: {
+          content: string
+          id: string
+          job_id: string
+          language: string
+          similarity: number
+        }[]
+      }
     }
     Enums: {
       job_status: "queued" | "processing" | "completed" | "failed" | "paused"

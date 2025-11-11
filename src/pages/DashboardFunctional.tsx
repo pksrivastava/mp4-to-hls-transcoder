@@ -3,6 +3,7 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { JobCard } from "@/components/JobCard";
+import { TranscriptionDialog } from "@/components/TranscriptionDialog";
 import { Activity, FileVideo, CheckCircle2, AlertCircle, HardDrive, Download, Trash2 } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
@@ -57,6 +58,12 @@ const DashboardFunctional = () => {
   } | null>(null);
   const [selectedJobIds, setSelectedJobIds] = useState<Set<string>>(new Set());
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [transcriptionDialogOpen, setTranscriptionDialogOpen] = useState(false);
+  const [selectedJobForTranscription, setSelectedJobForTranscription] = useState<{
+    jobId: string;
+    sourceUrl: string;
+    fileName: string;
+  } | null>(null);
   const { toast } = useToast();
 
   useEffect(() => {
@@ -305,6 +312,18 @@ const DashboardFunctional = () => {
     }
   };
 
+  const handleTranscribe = (id: string) => {
+    const job = jobs.find((j) => j.id === id);
+    if (job) {
+      setSelectedJobForTranscription({
+        jobId: job.id,
+        sourceUrl: job.source_url,
+        fileName: job.file_name,
+      });
+      setTranscriptionDialogOpen(true);
+    }
+  };
+
   const handleDelete = async (id: string) => {
     const { error } = await supabase
       .from("transcoding_jobs")
@@ -445,9 +464,11 @@ const DashboardFunctional = () => {
                 progress={job.progress || 0}
                 createdAt={job.created_at}
                 format={job.format}
+                sourceUrl={job.source_url}
                 onView={handleViewJob}
                 onDownload={handleDownload}
                 onDelete={handleDelete}
+                onTranscribe={handleTranscribe}
                 isSelected={selectedJobIds.has(job.id)}
                 onSelectionChange={handleSelectionChange}
               />
@@ -494,6 +515,16 @@ const DashboardFunctional = () => {
           open={downloadDialogOpen}
           onOpenChange={setDownloadDialogOpen}
           jobs={selectedJobForDownload.jobs}
+        />
+      )}
+
+      {selectedJobForTranscription && (
+        <TranscriptionDialog
+          open={transcriptionDialogOpen}
+          onOpenChange={setTranscriptionDialogOpen}
+          jobId={selectedJobForTranscription.jobId}
+          sourceUrl={selectedJobForTranscription.sourceUrl}
+          fileName={selectedJobForTranscription.fileName}
         />
       )}
     </div>
